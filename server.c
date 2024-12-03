@@ -101,48 +101,70 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    printf("Client starting...\n");
-
-    int sock = 0;
-    struct sockaddr_in serv_addr;
+    int server_fd, new_sock;
+    struct sockaddr_in serv_addr, client_addr;
+    socklen_t addr_len = sizeof(client_addr);
     unsigned char buffer[BUF_SIZE] = {0};
     unsigned char encrypted[BUF_SIZE] = {0};
     unsigned char decrypted[BUF_SIZE] = {0};
 
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Socket creation error");
-        return -1;
+    // Create socket
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
     }
 
+    // Configure server address
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(PORT);
-
-    if (inet_pton(AF_INET, "192.168.117.161", &serv_addr.sin_addr) <= 0) {
-        perror("Invalid address / Address not supported");
-        return -1;
+    if (inet_pton(AF_INET, "0.0.0.0", &serv_addr.sin_addr) <= 0) {
+        perror("Invalid address or address not supported");
+        exit(EXIT_FAILURE);
     }
 
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        perror("Connection failed");
-        return -1;
+    // Bind the socket to the address and port
+    if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("Bind failed");
+        exit(EXIT_FAILURE);
     }
 
-    printf("Connected to server\n");
+    // Listen for incoming connections
+    if (listen(server_fd, 3) < 0) {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server listening on port %d...\n", PORT);
+
+    // Accept incoming connections
+    if ((new_sock = accept(server_fd, (struct sockaddr *)&client_addr, &addr_len)) < 0) {
+        perror("Accept failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Connection accepted from %s\n", inet_ntoa(client_addr.sin_addr));
 
     while (1) {
+        int bytes_read = read(new_sock, encrypted, BUF_SIZE);
+        if (bytes_read <= 0) {
+            perror("Read failed");
+            break;
+        }
+
+        int decrypted_len = aes_decrypt(encrypted, bytes_read, (unsigned char *)AES_KEY, (unsigned char *)AES_IV, decrypted);
+        decrypted[decrypted_len] = '\0';  // Null terminate the decrypted string
+        printf("Client: %s\n", decrypted);
+
+        // Send response to the client (Encrypted)
         printf("Enter message: ");
         fgets((char *)buffer, BUF_SIZE, stdin);
         buffer[strcspn((char *)buffer, "\n")] = '\0';
 
         int encrypted_len = aes_encrypt(buffer, strlen((char *)buffer), (unsigned char *)AES_KEY, (unsigned char *)AES_IV, encrypted);
-        send(sock, encrypted, encrypted_len, 0);
-
-        int bytes_read = read(sock, encrypted, BUF_SIZE);
-        int decrypted_len = aes_decrypt(encrypted, bytes_read, (unsigned char *)AES_KEY, (unsigned char *)AES_IV, decrypted);
-        decrypted[decrypted_len] = '\0';
-        printf("Server: %s\n", decrypted);
+        send(new_sock, encrypted, encrypted_len, 0);
     }
 
-    close(sock);
+    close(new_sock);
+    close(server_fd);
     return 0;
 }
